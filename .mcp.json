@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "alisx": {
+      "type": "http",
+      "url": "https://mcp-v2.alisx.com"
+    }
+  }
+}
