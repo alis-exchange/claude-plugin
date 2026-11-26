@@ -1,0 +1,28 @@
+{
+  "name": "alisx",
+  "owner": {
+    "name": "AlisX"
+  },
+  "plugins": [
+    {
+      "name": "alis",
+      "source": "./",
+      "description": "AlisX in Claude: the AlisX connector for the platform's work, and the dbd skill with the scripts for what has to happen on the machine.",
+      "version": "1.0.0",
+      "author": {
+        "name": "AlisX"
+      },
+      "homepage": "https://github.com/alis-exchange/claude-plugin",
+      "repository": "https://github.com/alis-exchange/claude-plugin",
+      "license": "MIT",
+      "keywords": [
+        "alis",
+        "alisx",
+        "build",
+        "define",
+        "deploy"
+      ],
+      "category": "developer-tools"
+    }
+  ]
+}
