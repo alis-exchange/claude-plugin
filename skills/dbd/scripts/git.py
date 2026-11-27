@@ -76,6 +76,41 @@ def set_up(repo: Path) -> None:
         alisx.git_ok(repo, "config", "user.name", me.get("displayName") or me["email"])
 
 
+# git with Git LFS's filters off: files are compared and written as they are
+# stored, not as the repo's LFS rules would store them.
+LFS_OFF = ("-c", "filter.lfs.process=", "-c", "filter.lfs.clean=", "-c", "filter.lfs.smudge=",
+           "-c", "filter.lfs.required=false")
+
+
+def stored_before_lfs(repo: Path) -> list[str]:
+    """Files git shows as changed only because the repo's LFS rules came after them.
+
+    A file that matches the rules in .gitattributes but was committed as a plain
+    file reads as changed wherever git-lfs is installed, though nobody changed
+    it: with LFS's filters off it is the same. Such files are not the person's
+    changes, and they are what made a rebase refuse ("You have unstaged changes").
+    """
+    shown = set(alisx.git(repo, "diff", "--name-only", stdout_only=True).split("\n"))
+    real = set(alisx.git(repo, *LFS_OFF, "diff", "--name-only", stdout_only=True).split("\n"))
+    return sorted(f for f in shown - real if f)
+
+
+def say_stored_before_lfs(repo: Path, files: list[str]) -> None:
+    if files:
+        alisx.say(
+            "%d file(s) in %s show as changed but are not: they match the repo's LFS rules and were "
+            "committed before them (%s%s). Leave them out of commits: add only your own files "
+            "(git add <path>), never git add -A or git commit -a."
+            % (len(files), repo, ", ".join(files[:3]), ", ..." if len(files) > 3 else "")
+        )
+
+
+def after_lfs_off(repo: Path) -> None:
+    """Files a pull wrote with LFS's filters off get their large content back."""
+    if alisx.git_ok(repo, "lfs", "version"):
+        alisx.git_ok(repo, "lfs", "checkout", remote=True)
+
+
 def rebasing(repo: Path) -> bool:
     """Whether a rebase stopped part way in the repo."""
     git_dir = Path(alisx.git(repo, "rev-parse", "--git-dir", stdout_only=True).strip())
@@ -88,8 +123,12 @@ def pull_repo(repo: Path, rebase: bool = False) -> str:
     branch = branch_of(repo)
     if rebase:
         return rebase_repo(repo, branch)
+    phantoms = stored_before_lfs(repo)
+    off = LFS_OFF if phantoms else ()
     try:
-        alisx.git(repo, "-c", "pull.rebase=false", "pull", "--ff-only", "origin", branch, remote=True)
+        alisx.git(repo, *off, "-c", "pull.rebase=false", "pull", "--ff-only", "origin", branch, remote=True)
+        if off:
+            after_lfs_off(repo)
     except alisx.GitFailed as failed:
         said = failed.output.lower()
         if "couldn't find remote ref" in said or "could not find remote ref" in said:
@@ -102,14 +141,21 @@ def pull_repo(repo: Path, rebase: bool = False) -> str:
                 % (repo, branch, failed.output.strip())
             )
         raise
+    say_stored_before_lfs(repo, phantoms)
     return "%s: %s is up to date with its remote, at %s." % (repo, branch, head(repo))
 
 
 def rebase_repo(repo: Path, branch: str) -> str:
     """Put this checkout's commits on top of the remote's, or change nothing."""
     before = alisx.git(repo, "rev-parse", "HEAD", stdout_only=True).strip()
+    # Files that only look changed (stored_before_lfs) are compared as they
+    # are stored, so that they neither stop the rebase nor are set aside for it.
+    phantoms = stored_before_lfs(repo)
+    off = LFS_OFF if phantoms else ()
     try:
-        alisx.git(repo, "-c", "rebase.autoStash=true", "pull", "--rebase", "origin", branch, remote=True)
+        alisx.git(repo, *off, "-c", "rebase.autoStash=true", "pull", "--rebase", "origin", branch, remote=True)
+        if off:
+            after_lfs_off(repo)
     except alisx.GitFailed as failed:
         said = failed.output.lower()
         if "couldn't find remote ref" in said or "could not find remote ref" in said:
@@ -119,13 +165,14 @@ def rebase_repo(repo: Path, branch: str) -> str:
         conflicts = ""
         if rebasing(repo):
             conflicts = alisx.git(repo, "diff", "--name-only", "--diff-filter=U", stdout_only=True).strip()
-            alisx.git_ok(repo, "rebase", "--abort")
+            alisx.git_ok(repo, *off, "rebase", "--abort")
         where = (" Both changed: %s." % ", ".join(conflicts.split())) if conflicts else ""
         raise alisx.Stop(
             "%s could not be rebased onto origin/%s, so it was left as it was, at %s.%s "
             "Resolve it with plain git (git rebase origin/%s, fix each file, git rebase --continue), "
             "then git.py push.\n%s" % (repo, branch, before[:12], where, branch, failed.output.strip())
         )
+    say_stored_before_lfs(repo, phantoms)
     return "%s: %s is on top of its remote, at %s." % (repo, branch, head(repo))
 
 
@@ -146,6 +193,7 @@ def clone_one(url: str, folder: Path, what: str) -> None:
     alisx.git(folder.parent, "clone", url, str(folder), remote=True)
     set_up(folder)
     alisx.say("Cloned %s to %s." % (what, folder))
+    say_stored_before_lfs(folder, stored_before_lfs(folder))
 
 
 def clone(product: str) -> int:
@@ -194,7 +242,9 @@ def push() -> int:
     commit = alisx.git(repo, "rev-parse", "HEAD").strip()
     alisx.say("Pushed %s at %s to its remote." % (branch, head(repo)))
     alisx.say("Commit: %s" % commit)
-    left = [line for line in alisx.git(repo, "status", "--porcelain").splitlines() if line.strip()]
+    phantoms = set(stored_before_lfs(repo))
+    left = [line for line in alisx.git(repo, "status", "--porcelain").splitlines()
+            if line.strip() and line[3:].strip() not in phantoms]
     if left:
         alisx.say("%d changed file(s) are not committed, so they were not pushed." % len(left))
     kind = kind_of(repo)

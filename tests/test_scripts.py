@@ -450,6 +450,39 @@ class Git(ScriptTest):
         self.assertEqual(self.machine.git(self.build, "status", "--porcelain").strip(), "")
         self.assertFalse((self.build / ".git" / "rebase-merge").exists())
 
+    @unittest.skipUnless(shutil.which("git-lfs"), "git-lfs is not installed")
+    def test_files_committed_before_the_lfs_rules_neither_stop_a_rebase_nor_count_as_changes(self):
+        # As in alis.zz: images committed plain, then rules that keep images in
+        # Git LFS. Wherever git-lfs is installed they read as changed, and a
+        # rebase refused ("You have unstaged changes"): Claude went round it
+        # with stashes and a second worktree, and tried to force a push.
+        seed = self.machine.root / "seed-alis-os"
+        self.machine.write(seed, {"users/v1/logo.png": b"\x89PNG\r\n\x1a\n" + b"\x00\xff" * 64})
+        self.machine.git(seed, "add", "users/v1/logo.png")
+        self.machine.git(seed, "commit", "--quiet", "-m", "logo")
+        self.machine.write(seed, {".gitattributes": "*.png filter=lfs diff=lfs merge=lfs -text\n"})
+        self.machine.git(seed, "add", ".gitattributes")
+        self.machine.git(seed, "commit", "--quiet", "-m", "images in lfs")
+        self.machine.git(seed, "push", "--quiet", "origin", "HEAD:main")
+        code, out, err = self.machine.run("git.py", "clone", "alis.os")
+        self.assertEqual(code, 0, out + err)
+        self.assertIn("show as changed but are not", out)
+        self.assertIn("users/v1/logo.png", out)
+        self.machine.write(seed, {"users/v1/theirs.go": "package main\n"})
+        self.machine.git(seed, "add", "users/v1/theirs.go")
+        self.machine.git(seed, "commit", "--quiet", "-m", "theirs")
+        self.machine.git(seed, "push", "--quiet", "origin", "HEAD:main")
+        self.machine.write(self.build, {"users/v1/mine.go": "package main\n"})
+        self.machine.git(self.build, "add", "users/v1/mine.go")
+        self.machine.git(self.build, "commit", "--quiet", "-m", "mine")
+        code, out, err = self.machine.run("git.py", "pull", "--rebase", cwd=self.build)
+        self.assertEqual(code, 0, out + err)
+        self.assertIn("on top of its remote", out)
+        self.assertEqual(self.machine.git(self.build, "log", "--format=%s", "-2").split(), ["mine", "theirs"])
+        code, out, err = self.machine.run("git.py", "push", cwd=self.build)
+        self.assertEqual(code, 0, out + err)
+        self.assertNotIn("not committed", out)
+
     def test_a_push_the_remote_is_ahead_of_is_not_forced(self):
         self.machine.run("git.py", "clone", "alis.os")
         seed = self.machine.root / "seed-alis-os"
