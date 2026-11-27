@@ -2,7 +2,7 @@
 
 Many skills in the registry were written for the AlisX CLI (`alis ...`) or for an older connector. Where the CLI is not installed, the same work is done by a connector tool or by one of this skill's scripts. Follow the skill's steps and substitute from the tables.
 
-When unsure what a connector call takes, ask its `describe` tool: `describe` with a tool and a kind (`create service`) lists every option.
+When unsure what a connector call takes, ask its `describe` tool: `describe` with a tool and a kind (`create service`) lists every option. When a call is refused, its answer says what to change: never install the AlisX CLI to get round it.
 
 ## `alis` commands
 
@@ -10,7 +10,7 @@ When unsure what a connector call takes, ask its `describe` tool: `describe` wit
 | --- | --- |
 | `alis clone <build environment>.<product>` | `git.py clone <build environment>.<product>` |
 | `git clone`, `git pull`, `git push` on a product's or the definitions repo | `git.py clone`, `git.py pull`, `git.py push` |
-| `alis define <package> --dry-run` | Connector: `read`, thing `services/<package>`, part `definition check` |
+| `alis define <package> --dry-run` | Connector: `read`, thing `services/<package>`, part `definition check`, with every `.proto` of the service's folder in `options.files` (`name` and `content`) |
 | `alis define <package>` | Connector: `define`, then `wait` on its operation |
 | `alis define <package> --install` | The same, then `install_packages.py <package> --version <the new version>` |
 | `alis packages install <package>` | `install_packages.py <package>` |
@@ -23,7 +23,7 @@ When unsure what a connector call takes, ask its `describe` tool: `describe` wit
 | `alis environment list` | Connector: `read`, thing `products/<build environment>.<product>`, part `environments` |
 | `alis environment refresh` | `fetch_envs.py <build environment>.<product> <environment>` |
 | `alis environment set`, `unset` | Connector: `update` or `delete`, thing `products/<...>/environments/<id>`, part `variables` |
-| `alis service new <package>` | Connector: `create`, kind `service`. Then make its folders by hand (see SKILL.md, "Where things are") |
+| `alis service new <package>` | Connector: `create`, kind `service`, with the package id in `options.package` and no `in`. Then make its folders by hand (see SKILL.md, "Where things are") |
 | `alis blocks install`, `upgrade`, `uninstall` | Connector: `create`, `update`, `delete` (see `blocks.md`) |
 | `alis blocks merge` | `merge_block.py <block id> <package>` |
 | `alis blocks create` | `create_block.py` (see `blocks.md`) |

@@ -13,6 +13,8 @@ In Claude Code:
 
 The plugin is named `alis`, as the earlier AlisX plugin for the CLI is. Turn that one off first (`/plugin disable alis@alis`): the two give opposite advice on whether to use the CLI.
 
+If your Claude account already has the AlisX connector (added in Claude's settings), Claude Code may list the plugin's own entry beside it as needing a sign-in, and tell you it cannot reach AlisX until you sign it in. Sign it in once with `/mcp`: both are the same server.
+
 ## What is in it
 
 | Part | Where | What it is for |

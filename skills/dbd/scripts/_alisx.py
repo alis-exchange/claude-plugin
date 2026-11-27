@@ -392,7 +392,11 @@ def service_name(service: Service) -> str:
     while True:
         answer = api("NeuronsService", "ListNeurons", {"parent": service.product_name, "pageSize": PAGE_SIZE, "pageToken": page})
         for neuron in answer.get("neurons", []):
-            if neuron.get("packageId") == service.package:
+            # The API gives a service's package id bare (alis.os.users.v1) or as
+            # a name (packages/alis.os.users.v1), and a new service has none yet:
+            # its resource name ends in the id with dashes (users-v1).
+            package = (neuron.get("packageId") or "").removeprefix("packages/")
+            if package == service.package or neuron.get("name", "").endswith("/neurons/" + service.neuron):
                 return neuron["name"]
         page = answer.get("nextPageToken") or ""
         if not page:

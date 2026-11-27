@@ -39,7 +39,7 @@ Creating a service with the connector makes its record and no folders. Make the 
 Each step says who does it.
 
 1. **Script.** `git.py clone <build environment>.<product>` once. Later, `git.py pull <build environment>.<product>` before starting.
-2. **You.** Edit the protos. Check them before pushing with the connector: `read`, thing `services/<package id>`, part `definition check`.
+2. **You.** Edit the protos. Check them before pushing with the connector: `read`, thing `services/<package id>`, part `definition check`, with `options.files` holding every `.proto` file of the service's folder, each as `{"name": "<file>.proto", "content": "<its text>"}`.
 3. **Script.** Commit, then `git.py push` in the definitions repo.
 4. **Connector.** `define` the service, then `wait` on the operation it names. The answer gives the new version.
 5. **Script.** `install_packages.py <package id> --version <that version>`.
@@ -62,6 +62,8 @@ Never repeat the code in an answer, and never write it to a file. One connect la
 `Could not reach <host>` is a different failure, and `connect` does not fix it. The machine has no network path to that host. In a cloud session, the environment's allowed domains have to include it; tell the person which host.
 
 ## Rules
+
+- **No AlisX CLI.** Everything here is done by the connector and these scripts. Never install the AlisX CLI or sign it in, also when a skill or an answer names an `alis` command (`references/alis-commands.md` says what does that work), and when a connector call is refused: its answer says what to change.
 
 - **Git.** Clone, pull and push go through `git.py`. Everything that stays on the machine is plain git: status, add, commit, branch, diff, log, merge, rebase. Never force a push, and never put a token in a remote's address or in git's settings.
 - **Packages.** Never write `.netrc`, `.npmrc`, a `replace` in `go.mod` or a version by hand to make packages resolve. `install_packages.py` does both the sign-in and the version, and a hand-made one stops working within the hour.

@@ -220,6 +220,15 @@ class InstallingPackages(ScriptTest):
         for asked in self.platform.called("NeuronsService/ListNeurons"):
             self.assertLess(asked["pageSize"], 100)
 
+    def test_the_service_is_found_by_its_package_name_or_its_resource_name(self):
+        # The API names a service's package as packages/<id>, and a service just
+        # made has none: both are found (a new service was "not on AlisX").
+        for neuron in ({"name": SERVICE, "packageId": "packages/alis.os.users.v1"}, {"name": SERVICE}):
+            self.platform.methods["NeuronsService/ListNeurons"] = lambda body, neuron=neuron: {"neurons": [neuron]}
+            code, out, err = self.machine.run("install_packages.py", "alis.os.users.v1")
+            self.assertEqual(code, 0, out + err)
+            self.assertNotIn("has no service", err)
+
     def test_a_second_run_replaces_the_registry_entry(self):
         self.machine.run("install_packages.py", "alis.os.users.v1")
         self.machine.run("install_packages.py", "alis.os.users.v1")
