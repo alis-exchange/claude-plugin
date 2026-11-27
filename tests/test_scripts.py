@@ -132,6 +132,32 @@ class FetchingEnvs(ScriptTest):
         self.assertEqual(code, 1)
         self.assertIn("Development (dev-1)", err)
 
+    def test_environments_are_listed_in_pages_the_services_take(self):
+        self.machine.run("fetch_envs.py", "alis.os", "Development")
+        for asked in self.platform.called("EnvironmentsService/ListEnvironments"):
+            self.assertLess(asked["pageSize"], 100)
+
+    def test_an_environment_named_by_its_id_is_read_alone(self):
+        product = "organisations/alis/products/os"
+        self.platform.methods["EnvironmentsService/GetEnvironment"] = lambda body: (
+            {"name": body["name"], "displayName": "Development", "type": "DEV"} if body["name"] == product + "/environments/dev-1"
+            else (_ for _ in ()).throw(Refused("not_found", "no such environment", 404)))
+        code, out, err = self.machine.run("fetch_envs.py", "alis.os", "dev-1")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.platform.called("EnvironmentsService/ListEnvironments"), [])
+        # A name that is no id is looked for among them all.
+        code, out, err = self.machine.run("fetch_envs.py", "alis.os", "development")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(len(self.platform.called("EnvironmentsService/ListEnvironments")), 1)
+
+    def test_a_refusal_fails_the_run(self):
+        def refuse(body):
+            raise Refused("invalid_argument", "validation error: page_size must be less than 100")
+        self.platform.methods["EnvironmentsService/ListEnvironments"] = refuse
+        code, out, err = self.machine.run("fetch_envs.py", "alis.os", "Development")
+        self.assertEqual(code, 1)
+        self.assertIn("page_size must be less than 100", err)
+
 
 class InstallingPackages(ScriptTest):
     def setUp(self):
@@ -180,6 +206,20 @@ class InstallingPackages(ScriptTest):
         self.assertIn("Left alone (Rust)", out)
         self.assertNotIn("registry-token", out + err)
 
+    def test_auth_only_signs_in_and_changes_nothing_else(self):
+        code, out, err = self.machine.run("install_packages.py", "alis.os.users.v1", "--auth-only")
+        self.assertEqual(code, 0, out + err)
+        self.assertIn("machine europe-west1-go.pkg.dev", (self.machine.home / ".netrc").read_text())
+        self.assertEqual(self.platform.called("NeuronsService/GeneratePackageScripts"), [])
+        self.assertFalse((self.folder / "ran.txt").exists())
+        self.assertIn("Nothing was installed", out)
+        self.assertNotIn("registry-token", out + err)
+
+    def test_the_service_is_found_in_pages_the_services_take(self):
+        self.machine.run("install_packages.py", "alis.os.users.v1")
+        for asked in self.platform.called("NeuronsService/ListNeurons"):
+            self.assertLess(asked["pageSize"], 100)
+
     def test_a_second_run_replaces_the_registry_entry(self):
         self.machine.run("install_packages.py", "alis.os.users.v1")
         self.machine.run("install_packages.py", "alis.os.users.v1")
@@ -203,6 +243,65 @@ class InstallingPackages(ScriptTest):
         code, out, err = self.machine.run("install_packages.py", "alis.os.users.v1")
         self.assertEqual(code, 1)
         self.assertIn("does not have NeuronsService.GeneratePackageScripts yet", err)
+
+
+class Running(ScriptTest):
+    def setUp(self):
+        super().setUp()
+        self.machine.connect()
+        self.repo = self.machine.workspace / "alis" / "build" / "os"
+        self.folder = self.repo / "users" / "v1"
+        self.machine.write(self.folder, {"go.mod": "module alis.os.users.v1\n", "main.go": "package main\n"})
+        self.machine.git(self.repo, "init", "--quiet")
+        product = "organisations/alis/products/os"
+        self.platform.methods["EnvironmentsService/ListEnvironments"] = lambda body: {"environments": [
+            {"name": product + "/environments/dev-1", "displayName": "Development", "type": "DEV"},
+            {"name": product + "/environments/prod-1", "displayName": "Production", "type": "PROD"},
+        ]}
+        self.platform.methods["EnvironmentsService/GenerateEnvironmentCredentials"] = lambda body: {
+            "dotenv": base64.b64encode(b'SEARCH_ENABLED="true"\nGOPROXY="https://europe-west1-go.pkg.dev/proj/define-go,direct"\nAPI_KEY="s3cret-value"\n').decode(),
+            "serviceAccountKey": base64.b64encode(b'{"private_key": "k3y-value"}').decode(),
+        }
+        self.platform.methods["ProductsService/GenerateRegistryCredentials"] = lambda body: {
+            "accessToken": "registry-token", "hosts": [{"registry": "GO", "host": "https://europe-west1-go.pkg.dev/proj/define-go"}]}
+        self.show = [sys.executable, "-c", "import os; print('seen', os.environ['SEARCH_ENABLED'], os.environ['GOPROXY'], os.getcwd())"]
+
+    def test_the_service_runs_with_the_environments_values_and_registries(self):
+        code, out, err = self.machine.run("run.py", "alis.os.users.v1", "Development", "--", *self.show)
+        self.assertEqual(code, 0, out + err)
+        self.assertIn("seen true https://europe-west1-go.pkg.dev/proj/define-go,direct %s" % self.folder, out)
+        self.assertIn("machine europe-west1-go.pkg.dev", (self.machine.home / ".netrc").read_text())
+        self.private(self.repo / ".alis" / ".env")
+        self.assertNotIn("s3cret-value", out + err)
+        self.assertNotIn("k3y-value", out + err)
+        self.assertNotIn("registry-token", out + err)
+        # The values are kept, and used again without a new key.
+        code, out, err = self.machine.run("run.py", "alis.os.users.v1", "Development", "--", *self.show)
+        self.assertEqual(code, 0, out + err)
+        self.assertEqual(len(self.platform.called("EnvironmentsService/GenerateEnvironmentCredentials")), 1)
+        code, out, err = self.machine.run("run.py", "alis.os.users.v1", "Development", "--fresh", "--", *self.show)
+        self.assertEqual(len(self.platform.called("EnvironmentsService/GenerateEnvironmentCredentials")), 2)
+
+    def test_the_commands_exit_code_is_the_runs(self):
+        code, out, err = self.machine.run("run.py", "alis.os.users.v1", "Development", "--", sys.executable, "-c", "raise SystemExit(4)")
+        self.assertEqual(code, 4)
+
+    def test_production_waits_for_the_persons_word(self):
+        code, out, err = self.machine.run("run.py", "alis.os.users.v1", "Production", "--", *self.show)
+        self.assertEqual(code, 1)
+        self.assertIn("production environment", err)
+        self.assertEqual(self.platform.called("EnvironmentsService/GenerateEnvironmentCredentials"), [])
+        # Values kept from Development are not taken for Production.
+        self.machine.run("run.py", "alis.os.users.v1", "Development", "--", *self.show)
+        code, out, err = self.machine.run("run.py", "alis.os.users.v1", "Production", "--", *self.show)
+        self.assertEqual(code, 1)
+
+    def test_a_service_with_no_usual_command_asks_for_one(self):
+        (self.folder / "go.mod").unlink()
+        code, out, err = self.machine.run("run.py", "alis.os.users.v1", "Development")
+        self.assertEqual(code, 2)
+        self.assertIn("name the command after --", err)
+        self.assertEqual(self.platform.called("EnvironmentsService/GenerateEnvironmentCredentials"), [])
 
 
 class CreatingABlock(ScriptTest):
@@ -303,6 +402,44 @@ class Git(ScriptTest):
         self.assertIn("username=alisx-plugin", asked.stdout)
         self.assertRegex(asked.stdout, r"password=\S+\.\S+\.signature")
         self.assertNotIn("from-another-helper", asked.stdout)
+
+    def test_pull_rebase_puts_this_checkouts_commits_on_top(self):
+        self.machine.run("git.py", "clone", "alis.os")
+        seed = self.machine.root / "seed-alis-os"
+        self.machine.write(seed, {"users/v1/theirs.go": "package main\n"})
+        self.machine.git(seed, "add", "-A")
+        self.machine.git(seed, "commit", "--quiet", "-m", "theirs")
+        self.machine.git(seed, "push", "--quiet", "origin", "HEAD:main")
+        self.machine.write(self.build, {"users/v1/mine.go": "package main\n", "users/v1/unsaved.go": "x"})
+        self.machine.git(self.build, "add", "users/v1/mine.go")
+        self.machine.git(self.build, "commit", "--quiet", "-m", "mine")
+        code, out, err = self.machine.run("git.py", "pull", cwd=self.build)
+        self.assertEqual(code, 1)
+        self.assertIn("git.py pull --rebase", err)
+        code, out, err = self.machine.run("git.py", "pull", "--rebase", cwd=self.build)
+        self.assertEqual(code, 0, err)
+        self.assertIn("on top of its remote", out)
+        log = self.machine.git(self.build, "log", "--format=%s", "-3").split()
+        self.assertEqual(log[:2], ["mine", "theirs"])
+        # A change that was not committed is still there.
+        self.assertEqual((self.build / "users" / "v1" / "unsaved.go").read_text(), "x")
+
+    def test_a_rebase_that_stops_is_undone(self):
+        self.machine.run("git.py", "clone", "alis.os")
+        seed = self.machine.root / "seed-alis-os"
+        self.machine.write(seed, {"users/v1/main.go": "package main // theirs\n"})
+        self.machine.git(seed, "commit", "--quiet", "-am", "theirs")
+        self.machine.git(seed, "push", "--quiet", "origin", "HEAD:main")
+        self.machine.write(self.build, {"users/v1/main.go": "package main // mine\n"})
+        self.machine.git(self.build, "commit", "--quiet", "-am", "mine")
+        before = self.machine.git(self.build, "rev-parse", "HEAD").strip()
+        code, out, err = self.machine.run("git.py", "pull", "--rebase", cwd=self.build)
+        self.assertEqual(code, 1)
+        self.assertIn("left as it was", err)
+        self.assertIn("users/v1/main.go", err)
+        self.assertEqual(self.machine.git(self.build, "rev-parse", "HEAD").strip(), before)
+        self.assertEqual(self.machine.git(self.build, "status", "--porcelain").strip(), "")
+        self.assertFalse((self.build / ".git" / "rebase-merge").exists())
 
     def test_a_push_the_remote_is_ahead_of_is_not_forced(self):
         self.machine.run("git.py", "clone", "alis.os")

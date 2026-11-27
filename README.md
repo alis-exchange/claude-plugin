@@ -19,7 +19,7 @@ The plugin is named `alis`, as the earlier AlisX plugin for the CLI is. Turn tha
 | --- | --- | --- |
 | The AlisX connector | `.mcp.json` | The platform's work: skills, Alis Ideate, artifacts, and Define, Build, Deploy. It is the server `alis.os.mcp.v2` at `https://mcp-v2.alisx.com` |
 | The `dbd` skill | `skills/dbd/` | The machine's work, and the order in which machine steps and connector calls alternate |
-| Six scripts | `skills/dbd/scripts/` | What has to happen where the code is |
+| Seven scripts | `skills/dbd/scripts/` | What has to happen where the code is |
 
 There is one skill on purpose. The connector describes itself (its instructions, its tools, its `describe` tool), and how to do a piece of work lives in the skill registry, which the connector searches. The plugin's skill holds only what neither can know: the machine's half.
 
@@ -32,9 +32,10 @@ Python 3 and git, standard library only: nothing to install.
 | Script | What it does |
 | --- | --- |
 | `connect.py` | Trades the connector's one-time code for a sign-in kept on the machine |
-| `git.py` | `clone`, `pull` and `push` a product's repos, signed in for that one command |
-| `install_packages.py` | Signs the machine in to a product's package registries and runs the install commands AlisX generates |
+| `git.py` | `clone`, `pull` (`--rebase` too) and `push` a product's repos, signed in for that one command |
+| `install_packages.py` | Signs the machine in to a product's package registries and runs the install commands AlisX generates (`--auth-only`: the sign-in alone) |
 | `fetch_envs.py` | Writes a deployment environment's variables to `.alis/.env` in the product's clone |
+| `run.py` | Runs a service on the machine against a deployment environment: its variables, its key and the package registries |
 | `create_block.py` | Creates a code block from a service's files |
 | `merge_block.py` | Merges an installed block's branch into the main branches and pushes |
 

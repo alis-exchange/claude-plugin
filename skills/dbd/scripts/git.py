@@ -2,7 +2,7 @@
 """Clone, pull and push a product's repos, signed in as the person.
 
     git.py clone <build environment>.<product>
-    git.py pull [<build environment>.<product>]
+    git.py pull [<build environment>.<product>] [--rebase]
     git.py push
 
 A build environment has one definitions repo (`proto`) and one repo for each
@@ -76,8 +76,18 @@ def set_up(repo: Path) -> None:
         alisx.git_ok(repo, "config", "user.name", me.get("displayName") or me["email"])
 
 
-def pull_repo(repo: Path) -> str:
+def rebasing(repo: Path) -> bool:
+    """Whether a rebase stopped part way in the repo."""
+    git_dir = Path(alisx.git(repo, "rev-parse", "--git-dir", stdout_only=True).strip())
+    if not git_dir.is_absolute():
+        git_dir = repo / git_dir
+    return (git_dir / "rebase-merge").exists() or (git_dir / "rebase-apply").exists()
+
+
+def pull_repo(repo: Path, rebase: bool = False) -> str:
     branch = branch_of(repo)
+    if rebase:
+        return rebase_repo(repo, branch)
     try:
         alisx.git(repo, "-c", "pull.rebase=false", "pull", "--ff-only", "origin", branch, remote=True)
     except alisx.GitFailed as failed:
@@ -87,11 +97,36 @@ def pull_repo(repo: Path) -> str:
         if "not possible to fast-forward" in said or "diverg" in said or "overwritten" in said:
             raise alisx.Stop(
                 "%s could not be brought up to date: %s and its remote have each moved, "
-                "or local changes are in the way. Nothing was changed. Commit or stash, "
-                "then merge or rebase origin/%s by hand.\n%s" % (repo, branch, branch, failed.output.strip())
+                "or local changes are in the way. Nothing was changed. To put this "
+                "checkout's own commits on top of the remote's, run `git.py pull --rebase`.\n%s"
+                % (repo, branch, failed.output.strip())
             )
         raise
     return "%s: %s is up to date with its remote, at %s." % (repo, branch, head(repo))
+
+
+def rebase_repo(repo: Path, branch: str) -> str:
+    """Put this checkout's commits on top of the remote's, or change nothing."""
+    before = alisx.git(repo, "rev-parse", "HEAD", stdout_only=True).strip()
+    try:
+        alisx.git(repo, "-c", "rebase.autoStash=true", "pull", "--rebase", "origin", branch, remote=True)
+    except alisx.GitFailed as failed:
+        said = failed.output.lower()
+        if "couldn't find remote ref" in said or "could not find remote ref" in said:
+            return "%s: %s is not on the remote yet, so there is nothing to pull." % (repo, branch)
+        # Nothing is left half done: a rebase that stopped is undone, which
+        # also puts back any changes that were set aside for it.
+        conflicts = ""
+        if rebasing(repo):
+            conflicts = alisx.git(repo, "diff", "--name-only", "--diff-filter=U", stdout_only=True).strip()
+            alisx.git_ok(repo, "rebase", "--abort")
+        where = (" Both changed: %s." % ", ".join(conflicts.split())) if conflicts else ""
+        raise alisx.Stop(
+            "%s could not be rebased onto origin/%s, so it was left as it was, at %s.%s "
+            "Resolve it with plain git (git rebase origin/%s, fix each file, git rebase --continue), "
+            "then git.py push.\n%s" % (repo, branch, before[:12], where, branch, failed.output.strip())
+        )
+    return "%s: %s is on top of its remote, at %s." % (repo, branch, head(repo))
 
 
 def head(repo: Path) -> str:
@@ -128,7 +163,7 @@ def clone(product: str) -> int:
     return 0
 
 
-def pull(product: str | None) -> int:
+def pull(product: str | None, rebase: bool = False) -> int:
     if product:
         organisation, product_id = alisx.split_product(product)
         repos = [alisx.define_root(organisation), alisx.build_root(organisation, product_id)]
@@ -138,7 +173,7 @@ def pull(product: str | None) -> int:
     else:
         repos = [top(Path.cwd())]
     for repo in repos:
-        alisx.say(pull_repo(repo))
+        alisx.say(pull_repo(repo, rebase))
     return 0
 
 
@@ -152,8 +187,8 @@ def push() -> int:
         if "non-fast-forward" in said or "fetch first" in said or "failed to push some refs" in said:
             raise alisx.Stop(
                 "The remote %s has commits this checkout lacks, so nothing was pushed "
-                "and nothing was forced. Run `git.py pull`, sort out what it reports, "
-                "then push again.\n%s" % (branch, failed.output.strip())
+                "and nothing was forced. Run `git.py pull --rebase` to put this checkout's "
+                "commits on top of them, then push again.\n%s" % (branch, failed.output.strip())
             )
         raise
     commit = alisx.git(repo, "rev-parse", "HEAD").strip()
@@ -177,12 +212,13 @@ def main() -> int:
     cloning.add_argument("product", help="<build environment>.<product>, for example alis.os")
     pulling = commands.add_parser("pull", help="bring the repo this is run in up to date, or both repos of a product")
     pulling.add_argument("product", nargs="?", help="<build environment>.<product>: pull its code and its definitions")
+    pulling.add_argument("--rebase", action="store_true", help="put this checkout's own commits on top of the remote's, when both have moved; a rebase that stops is undone")
     commands.add_parser("push", help="push the branch that is checked out, in the repo this is run in")
     args = parser.parse_args()
     if args.command == "clone":
         return clone(args.product)
     if args.command == "pull":
-        return pull(args.product)
+        return pull(args.product, args.rebase)
     if args.command == "push":
         return push()
     parser.print_help()

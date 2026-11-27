@@ -4,6 +4,7 @@
     install_packages.py <package id> [--version <version>]
     install_packages.py <package id> --add
     install_packages.py <package id> --upgrade-all
+    install_packages.py <package id> --auth-only
 
 Run it after a define has finished. It finds every manifest in the service's
 folder (go.mod, package.json, requirements.txt, pubspec.yaml), signs the
@@ -257,9 +258,10 @@ def main() -> int:
     parser.add_argument("--upgrade-all", action="store_true", help="upgrade every package, third-party ones too")
     parser.add_argument("--language", default="", help="only this language: go, node, python or dart")
     parser.add_argument("--path", action="append", default=[], help="only the manifest in this folder, relative to the service's folder (repeatable; . is its root)")
+    parser.add_argument("--auth-only", action="store_true", help="only sign this machine in to the product's package registries: no install, and no version changes")
     args = parser.parse_args()
-    if args.add and args.upgrade_all:
-        parser.error("--add and --upgrade-all are two different runs")
+    if sum((args.add, args.upgrade_all, args.auth_only)) > 1:
+        parser.error("--add, --upgrade-all and --auth-only are each a run of their own")
     action = "add" if args.add else "upgrade-all" if args.upgrade_all else "install"
 
     only = ""
@@ -289,6 +291,13 @@ def main() -> int:
         )
 
     languages = {location["language"] for location in locations}
+    if args.auth_only:
+        written = sign_in_to_registries(service.product_name, languages)
+        alisx.say("Signed this machine in to the product's package registries (%s), for about an hour. Nothing was installed and no version changed."
+                  % (", ".join(written) or "none were needed"))
+        if "GO" in languages:
+            alisx.say("Go also reads GOPROXY and GONOSUMDB, which the environment's .env from fetch_envs.py holds: run.py loads both for you.")
+        return 0
     for location in locations:
         if location["language"] == "PYTHON":
             location["pythonPackageManager"] = "UV" if shutil.which("uv") else "PIP"
