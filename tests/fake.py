@@ -67,6 +67,9 @@ class Platform:
                         return self.answer(401, {"code": "unauthenticated", "message": "no token"})
                     name = self.path[len(PREFIX):]
                     platform.calls.append((name, body))
+                    # As the services do: a page of 100 or more is refused.
+                    if isinstance(body.get("pageSize"), int) and body["pageSize"] >= 100:
+                        return self.answer(400, {"code": "invalid_argument", "message": "validation error: page_size must be less than 100"})
                     method = platform.methods.get(name)
                     if not method:
                         return self.answer(404, {"code": "unimplemented", "message": "unknown method"})

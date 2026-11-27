@@ -1,6 +1,6 @@
 ---
 name: dbd
-description: Work on an Alis Build service's code on this machine, from clone to deploy. Carries the scripts for what the AlisX connector cannot do itself - clone, pull and push a product's repos (git.py), take a defined version's packages into the code (install_packages.py), write a deployment environment's variables to a local env file (fetch_envs.py), create or merge a code block (create_block.py, merge_block.py), and connect this machine (connect.py). Use when changing a service's protos or code, when running Define, Build, Deploy, when the connector's answer names one of these scripts or a step for the person's machine, when a skill names an `alis` command and the AlisX CLI is not installed, or when a script says the machine is not connected. Plain git clone, pull and push fail on these repos, and registry files or version pins written by hand go stale.
+description: Work on an Alis Build service's code on this machine, from clone to deploy. Carries the scripts for what the AlisX connector cannot do itself - clone, pull and push a product's repos (git.py), take a defined version's packages into the code (install_packages.py), write a deployment environment's variables to a local env file (fetch_envs.py), run a service on this machine against an environment (run.py), create or merge a code block (create_block.py, merge_block.py), and connect this machine (connect.py). Use when changing a service's protos or code, when running Define, Build, Deploy, when the connector's answer names one of these scripts or a step for the person's machine, when a skill names an `alis` command and the AlisX CLI is not installed, or when a script says the machine is not connected. Plain git clone, pull and push fail on these repos, and registry files or version pins written by hand go stale.
 ---
 
 # Define, Build, Deploy from this machine
@@ -14,9 +14,10 @@ They are in `scripts/`, beside this file. Run one as `python3 <this skill's fold
 | Script | What it does |
 | --- | --- |
 | `git.py clone <build environment>.<product>` | Clones the product's code and its build environment's definitions |
-| `git.py pull`, `git.py push` | Pulls or pushes the branch checked out in the repo it is run in |
-| `install_packages.py <package id> [--version <version>]` | Takes a defined version's packages into the service's code |
+| `git.py pull [--rebase]`, `git.py push` | Pulls or pushes the branch checked out in the repo it is run in; `--rebase` puts this checkout's commits on top of the remote's, and undoes a rebase that stops |
+| `install_packages.py <package id> [--version <version>]` | Takes a defined version's packages into the service's code; `--auth-only` only signs in to the package registries |
 | `fetch_envs.py <build environment>.<product> <environment>` | Writes an environment's variables to `.alis/.env` in the product's clone |
+| `run.py <package id> <environment> [-- <command>]` | Runs the service here against an environment: its variables, its key and the package registries, then `go run .`, `npm start` or the command given |
 | `create_block.py`, `merge_block.py` | Code blocks: see `references/blocks.md` |
 | `connect.py <code> ...` | Connects this machine, with the code the connector hands out |
 
@@ -42,7 +43,7 @@ Each step says who does it.
 3. **Script.** Commit, then `git.py push` in the definitions repo.
 4. **Connector.** `define` the service, then `wait` on the operation it names. The answer gives the new version.
 5. **Script.** `install_packages.py <package id> --version <that version>`.
-6. **You.** Write the code, build it and test it. When it needs an environment's values to run: `fetch_envs.py`.
+6. **You.** Write the code, build it and test it. To run it against an environment: `run.py <package id> <environment>`.
 7. **Script.** Commit, then `git.py push` in the product's repo.
 8. **Connector.** `build` the service, `wait`, then `deploy` it. A production environment only on the person's own word.
 
@@ -65,7 +66,8 @@ Never repeat the code in an answer, and never write it to a file. One connect la
 - **Git.** Clone, pull and push go through `git.py`. Everything that stays on the machine is plain git: status, add, commit, branch, diff, log, merge, rebase. Never force a push, and never put a token in a remote's address or in git's settings.
 - **Packages.** Never write `.netrc`, `.npmrc`, a `replace` in `go.mod` or a version by hand to make packages resolve. `install_packages.py` does both the sign-in and the version, and a hand-made one stops working within the hour.
 - **Secrets.** Never print, `cat` or read `.alis/.env` or `.alis/key.json` into the conversation, and never paste a value from them. Load them into the command that needs them with the line `fetch_envs.py` ends on. Changing a variable is the connector's `update`, not this script.
-- **Production.** `fetch_envs.py --production` and the connector's `confirm_production` are passed only when the person said so in this conversation.
+- **Production.** `fetch_envs.py --production`, `run.py --production` and the connector's `confirm_production` are passed only when the person said so in this conversation.
+- **Building.** The connector's `build` takes, in `build_paths`, only the Dockerfiles whose code changed: the service's other images are retagged from its last build.
 - **Code leaving the machine.** `create_block.py` sends a service's files to AlisX. Show the person what it lists and pass `--confirm` only on their yes.
 
 ## More

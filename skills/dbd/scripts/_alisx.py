@@ -27,6 +27,9 @@ SCOPE = "build:read build:write"
 DEFAULT_IDENTITY = "https://identity.alisx.com"
 API_PACKAGE = "alis.os.gateway.v1"
 TIMEOUT = 120
+# How many a list is asked for at once. The services refuse a page of 100 or
+# more, so a list is read in pages of this many.
+PAGE_SIZE = 50
 
 EXIT_FAILED = 1
 EXIT_USAGE = 2
@@ -387,7 +390,7 @@ def service_name(service: Service) -> str:
     """The service's resource name, as the API lists it (its id is not always its path)."""
     page = ""
     while True:
-        answer = api("NeuronsService", "ListNeurons", {"parent": service.product_name, "pageSize": 200, "pageToken": page})
+        answer = api("NeuronsService", "ListNeurons", {"parent": service.product_name, "pageSize": PAGE_SIZE, "pageToken": page})
         for neuron in answer.get("neurons", []):
             if neuron.get("packageId") == service.package:
                 return neuron["name"]
